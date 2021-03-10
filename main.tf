@@ -88,7 +88,6 @@ resource "aws_security_group" "application" {
   name        = "application"
   description = "Allow application inbound traffic"
   vpc_id      = aws_vpc.vpc1234.id
-
   ingress {
     from_port   = 22
     to_port     = 22
@@ -138,46 +137,23 @@ resource "aws_network_interface" "foo" {
 resource "aws_security_group" "database" {
   name   = "database"
   vpc_id = aws_vpc.vpc1234.id
+
   ingress {
     from_port   = 3306
     to_port     = 3306
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
-
   }
-  ingress {
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
   }
-  ingress {
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-  ingress {
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-
-  }
-  ingress {
-    from_port   = 8080
-    to_port     = 8080
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-
-
-
 }
 
-resource "aws_s3_bucket" "bucket" {
-  bucket = "webapp.wenhao.min"
+resource "aws_s3_bucket" "webapp-wenhao-min" {
+  bucket = "webapp-wenhao-min"
   acl    = "private"
 
   force_destroy = true
@@ -190,7 +166,6 @@ resource "aws_s3_bucket" "bucket" {
       }
     }
   }
-
   lifecycle_rule {
     enabled = true
     transition {
@@ -198,35 +173,34 @@ resource "aws_s3_bucket" "bucket" {
       storage_class = "STANDARD_IA" # or "ONEZONE_IA"
     }
   }
-
 }
-resource "aws_db_subnet_group" "subnet-for-rds-instances" {
-  name       = "subnet-for-rds-instances"
+resource "aws_db_subnet_group" "subnetforrdsinstances" {
+  name       = "subnetforrdsinstances"
   subnet_ids = [aws_subnet.subnet1.id, aws_subnet.subnet2.id, aws_subnet.subnet3.id]
 
   tags = {
-    Name = "My DB subnet group"
+    Name = "subnetforrdsinstances"
   }
 }
 
-
 resource "aws_db_instance" "csye6225" {
-  allocated_storage      = 10
-  engine                 = "mysql"
-  engine_version         = "5.7"
-  instance_class         = "db.t3.micro"
-  name                   = "csye6225"
-  username               = "csye6225"
-  password               = "Mmwh1992"
-  parameter_group_name   = "default.mysql5.7"
-  skip_final_snapshot    = true
-  multi_az               = "false"
-  db_subnet_group_name   = "subnet-for-rds-instances"
-  identifier             = "csye6225"
+  allocated_storage    = 10
+  engine               = "mysql"
+  engine_version       = "5.7"
+  instance_class       = "db.t3.micro"
+  identifier           = "csye6225"
+  name                 = "csye6225"
+  username             = "csye6225"
+  password             = "Mmwh1992"
+  parameter_group_name = "default.mysql5.7"
+  skip_final_snapshot  = true
+  multi_az             = "false"
+  db_subnet_group_name = aws_db_subnet_group.subnetforrdsinstances.id
+
   publicly_accessible    = "false"
   vpc_security_group_ids = [aws_security_group.database.id]
+  apply_immediately      = true
 }
-
 resource "aws_iam_policy" "WebAppS3" {
   name        = "WebAppS3"
   path        = "/"
@@ -240,8 +214,8 @@ resource "aws_iam_policy" "WebAppS3" {
         ],
         "Effect" : "Allow",
         "Resource" : [
-          "arn:aws:s3:::YOUR_BUCKET_NAME",
-          "arn:aws:s3:::YOUR_BUCKET_NAME/bucket"
+          "arn:aws:s3:::webapp-wenhao-min",
+          "arn:aws:s3:::webapp-wenhao-min/*"
         ]
       }
     ]
@@ -257,25 +231,27 @@ resource "aws_iam_role" "EC2-CSYE6225" {
         Effect = "Allow"
         Sid    = ""
         Principal = {
+
           Service = "ec2.amazonaws.com"
         }
       },
     ]
   })
-  inline_policy {
-    name   = "WebAppS3"
-    policy = aws_iam_policy.WebAppS3.policy
-  }
-
   tags = {
     tag-key = "tag-value"
   }
 }
+resource "aws_iam_policy_attachment" "test-attach" {
+  name       = "test-attachment"
+  roles      = [aws_iam_role.EC2-CSYE6225.name]
+  policy_arn = aws_iam_policy.WebAppS3.arn
+}
+
+
 resource "aws_iam_instance_profile" "profile" {
   name = "profile"
   role = aws_iam_role.EC2-CSYE6225.name
 }
-
 data "aws_ami" "ubuntu" {
   most_recent = true
   owners      = ["839935233432"]
@@ -285,7 +261,6 @@ data "aws_ami" "ubuntu" {
 resource "aws_instance" "web" {
   ami           = data.aws_ami.ubuntu.id
   instance_type = "t2.micro"
-
   tags = {
     Name = "myfirstInstance"
   }
@@ -294,18 +269,28 @@ resource "aws_instance" "web" {
     volume_size = 20
     volume_type = "gp2"
   }
-
-
   network_interface {
     network_interface_id = aws_network_interface.foo.id
     device_index         = 0
   }
-  //security_groups = [aws_security_group.application.name]
-
   iam_instance_profile = aws_iam_instance_profile.profile.name
   key_name             = "6225"
-
+  depends_on           = [aws_db_instance.csye6225]
+  user_data            = <<EOF
+#!/bin/bash
+sudo touch .env
+sudo echo '#!/bin/bash' > .env
+sudo echo "HOST="${aws_db_instance.csye6225.address}."
+USERNAME="${aws_db_instance.csye6225.username}"
+PASSWORD="${aws_db_instance.csye6225.password}"
+Bucket="${aws_s3_bucket.webapp-wenhao-min.id}"
+DB="${aws_db_instance.csye6225.name}"" >> .env
+cd  /var/lib/cloud/instance/scripts/
+sudo ./part-001
+EOF
 }
+
+
 
 
 
