@@ -142,12 +142,6 @@ resource "aws_security_group" "database" {
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
-  # egress {
-  #   from_port   = 0
-  #   to_port     = 0
-  #   protocol    = "-1"
-  #   cidr_blocks = ["0.0.0.0/0"]
-  # }
 }
 
 resource "aws_s3_bucket" "webapp-wenhao-min" {
@@ -246,6 +240,8 @@ resource "aws_iam_policy_attachment" "test-attach" {
 }
 
 
+
+
 resource "aws_iam_instance_profile" "profile" {
   name = "profile"
   role = aws_iam_role.EC2-CSYE6225.name
@@ -254,88 +250,10 @@ data "aws_ami" "ubuntu" {
   most_recent = true
   owners      = ["839935233432"]
 }
-
-# resource "aws_instance" "web" {
-#   ami           = data.aws_ami.ubuntu.id
-#   instance_type = "t2.micro"
-#   tags = {
-#     Name = "myfirstInstance"
-#   }
-#   disable_api_termination = false
-#   root_block_device {
-#     volume_size = 20
-#     volume_type = "gp2"
-#   }
-#   network_interface {
-#     network_interface_id = aws_network_interface.foo.id
-#     device_index         = 0
-#   }
-#   iam_instance_profile = aws_iam_instance_profile.profile.name
-#   key_name             = "6225"
-#   depends_on           = [aws_db_instance.csye6225]
-#   user_data            = <<EOF
-# #!/bin/bash
-# sudo touch .env
-# sudo echo '#!/bin/bash' > .env
-# sudo echo "HOST="${aws_db_instance.csye6225.address}."
-# USERNAME="${aws_db_instance.csye6225.username}"
-# PASSWORD="${aws_db_instance.csye6225.password}"
-# Bucket="${aws_s3_bucket.webapp-wenhao-min.id}"
-# DB="${aws_db_instance.csye6225.name}"" >> .env
-# cd  /var/lib/cloud/instance/scripts/
-# sudo ./part-001
-# EOF
-# }
-
-resource "aws_iam_policy" "CodeDeploy-EC2-S3" {
-  name        = "CodeDeploy-EC2-S3"
-  path        = "/"
-  description = "allows EC2 instances to read data from S3 buckets"
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = [
-          "s3:Get*",
-          "s3:List*"
-        ]
-        "Effect" : "Allow",
-        "Resource" : [
-          "arn:aws:s3:::codedeploy.wenhao.min.prod",
-          "arn:aws:s3:::codedeploy.wenhao.min.prod/*"
-        ]
-      },
-    ]
-  })
-}
-
-resource "aws_iam_policy" "GH-Upload-To-S3" {
-  name        = "GH-Upload-To-S3"
-  path        = "/"
-  description = "allows GitHub Actions to upload artifacts from latest successful build to dedicated S3 bucket used by CodeDeploy."
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        "Effect" : "Allow",
-        "Action" : [
-          "s3:PutObject",
-          "s3:Get*",
-          "s3:List*"
-        ],
-        "Resource" : [
-          "arn:aws:s3:::ghactions"
-        ]
-      },
-    ]
-  })
-}
 resource "aws_iam_policy" "GH-Code-Deploy" {
   name        = "GH-Code-Deploy"
   path        = "/"
   description = "allows GitHub Actions to call CodeDeploy APIs to initiate application deployment on EC2 instances."
-
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
@@ -373,60 +291,46 @@ resource "aws_iam_policy" "GH-Code-Deploy" {
     ]
   })
 }
-//change CODE_DEPLOY_APPLICATION_NAME
-
-resource "aws_iam_policy" "policy" {
-  name        = "gh-ec2-ami"
+resource "aws_iam_policy" "GH-Upload-To-S3" {
+  name        = "GH-Upload-To-S3"
   path        = "/"
-  description = "provides the minimal set permissions necessary for Packer to work:"
-
+  description = "allows GitHub Actions to upload artifacts from latest successful build to dedicated S3 bucket used by CodeDeploy."
   policy = jsonencode({
-    "Version" : "2012-10-17",
-    "Statement" : [
+    Version = "2012-10-17"
+    Statement = [
       {
         "Effect" : "Allow",
         "Action" : [
-          "ec2:AttachVolume",
-          "ec2:AuthorizeSecurityGroupIngress",
-          "ec2:CopyImage",
-          "ec2:CreateImage",
-          "ec2:CreateKeypair",
-          "ec2:CreateSecurityGroup",
-          "ec2:CreateSnapshot",
-          "ec2:CreateTags",
-          "ec2:CreateVolume",
-          "ec2:DeleteKeyPair",
-          "ec2:DeleteSecurityGroup",
-          "ec2:DeleteSnapshot",
-          "ec2:DeleteVolume",
-          "ec2:DeregisterImage",
-          "ec2:DescribeImageAttribute",
-          "ec2:DescribeImages",
-          "ec2:DescribeInstances",
-          "ec2:DescribeInstanceStatus",
-          "ec2:DescribeRegions",
-          "ec2:DescribeSecurityGroups",
-          "ec2:DescribeSnapshots",
-          "ec2:DescribeSubnets",
-          "ec2:DescribeTags",
-          "ec2:DescribeVolumes",
-          "ec2:DetachVolume",
-          "ec2:GetPasswordData",
-          "ec2:ModifyImageAttribute",
-          "ec2:ModifyInstanceAttribute",
-          "ec2:ModifySnapshotAttribute",
-          "ec2:RegisterImage",
-          "ec2:RunInstances",
-          "ec2:StopInstances",
-          "ec2:TerminateInstances",
-          "ec2:CreateLaunchTemplate",
-          "ec2:DeleteLaunchTemplate",
-          "ec2:CreateFleet",
-          "ec2:DescribeSpotPriceHistory",
-          "ec2:DescribeVpcs"
+          "s3:PutObject",
+          "s3:Get*",
+          "s3:List*"
         ],
-        "Resource" : "*"
-      }
+        "Resource" : [
+          "arn:aws:s3:::ghactions"
+        ]
+      },
+    ]
+  })
+}
+resource "aws_iam_policy" "CodeDeploy-EC2-S3" {
+  name        = "CodeDeploy-EC2-S3"
+  path        = "/"
+  description = "allows EC2 instances to read data from S3 buckets"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = [
+          "s3:Get*",
+          "s3:List*"
+        ]
+        "Effect" : "Allow",
+        "Resource" : [
+          "arn:aws:s3:::codedeploy.wenhao.min.prod",
+          "arn:aws:s3:::codedeploy.wenhao.min.prod/*"
+        ]
+      },
     ]
   })
 }
@@ -489,7 +393,11 @@ resource "aws_iam_policy_attachment" "CodeDeployEC2ServiceRole-attachS3" {
   roles      = [aws_iam_role.CodeDeployEC2ServiceRole.name]
   policy_arn = aws_iam_policy.WebAppS3.arn
 }
-
+resource "aws_iam_policy_attachment" "CodeDeployEC2ServiceRole-attachCloudWatch" {
+  name       = "CodeDeployEC2ServiceRole-attachCloudWatch"
+  roles      = [aws_iam_role.CodeDeployEC2ServiceRole.name]
+  policy_arn = "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
+}
 resource "aws_iam_instance_profile" "CodeDeployEC2ServiceRole" {
   name = "CodeDeployEC2ServiceRole"
   role = aws_iam_role.CodeDeployEC2ServiceRole.name
@@ -524,7 +432,6 @@ DB="${aws_db_instance.csye6225.name}"" >> /etc/environment
 EOF
 }
 
-
 resource "aws_codedeploy_app" "example" {
   compute_platform = "Server"
   name             = "csye6225-webapp"
@@ -552,6 +459,23 @@ resource "aws_codedeploy_deployment_group" "example" {
     events  = ["DEPLOYMENT_FAILURE"]
   }
 }
+
+resource "aws_route53_record" "dev-ns" {
+  zone_id = "Z0203108ITBZKHE9MNZV"
+  name    = "dev.wenhaom.me"
+  type    = "A"
+  ttl     = "60"
+  records = [aws_instance.web.public_ip]
+}
+resource "aws_route53_record" "prod-ns" {
+  zone_id = "Z048429427DLHB8MB7QVP"
+  name    = "prod.wenhaom.me"
+  type    = "A"
+  ttl     = "60"
+  records = [aws_instance.web.public_ip]
+}
+
+
 
 
 
