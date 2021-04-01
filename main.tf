@@ -1,6 +1,13 @@
 provider "aws" {
-  region = var.region
+  region                  = var.region
+  shared_credentials_file = "~/.aws/credentials"
+  profile                 = var.profile
 }
+variable "profile" {
+  type    = string
+  default = "prod"
+}
+
 variable "region" {
   type    = string
   default = "us-east-1"
@@ -402,25 +409,82 @@ resource "aws_iam_instance_profile" "CodeDeployEC2ServiceRole" {
   name = "CodeDeployEC2ServiceRole"
   role = aws_iam_role.CodeDeployEC2ServiceRole.name
 }
-resource "aws_instance" "web" {
-  ami           = data.aws_ami.ubuntu.id
-  instance_type = "t2.micro"
-  tags = {
-    Name = "CodeDeployEC2"
+# resource "aws_instance" "web" {
+#   ami           = data.aws_ami.ubuntu.id
+#   instance_type = "t2.micro"
+#   tags = {
+#     Name = "CodeDeployEC2"
+#   }
+#   disable_api_termination = false
+#   root_block_device {
+#     volume_size = 20
+#     volume_type = "gp2"
+#   }
+#   network_interface {
+#     network_interface_id = aws_network_interface.foo.id
+#     device_index         = 0
+#   }
+#   iam_instance_profile = aws_iam_instance_profile.CodeDeployEC2ServiceRole.name
+#   key_name             = "6225"
+#   depends_on           = [aws_db_instance.csye6225]
+#   user_data            = <<EOF
+# #!/bin/bash
+# sudo touch .env
+# sudo echo '#!/bin/bash' > .env
+# sudo echo "HOST="${aws_db_instance.csye6225.address}."
+# USERNAME="${aws_db_instance.csye6225.username}"
+# PASSWORD="${aws_db_instance.csye6225.password}"
+# Bucket="${aws_s3_bucket.webapp-wenhao-min.id}"
+# DB="${aws_db_instance.csye6225.name}"" >> /etc/environment
+# EOF
+# }
+
+
+# resource "aws_route53_record" "subdomin-ns" {
+#   zone_id = var.profile == "prod" ? "Z0809633154F51HJX4K3" : "Z08074672NPNTYRSOVXG0"
+#   name    = var.profile == "prod" ? "prod.wenhaom.me" : "dev.wenhaom.me"
+#   type    = "A"
+#   ttl     = "60"
+#   records = [aws_instance.web.public_ip]
+# }
+
+
+
+
+
+
+
+resource "aws_security_group" "load_balancer" {
+  name        = "security-group-lb"
+  description = "only allow 80 for ingress"
+  vpc_id      = aws_vpc.vpc1234.id
+  ingress {
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
   }
-  disable_api_termination = false
-  root_block_device {
-    volume_size = 20
-    volume_type = "gp2"
+  ingress {
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
   }
-  network_interface {
-    network_interface_id = aws_network_interface.foo.id
-    device_index         = 0
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
   }
-  iam_instance_profile = aws_iam_instance_profile.CodeDeployEC2ServiceRole.name
-  key_name             = "6225"
-  depends_on           = [aws_db_instance.csye6225]
-  user_data            = <<EOF
+}
+resource "aws_launch_configuration" "asg_launch_config" {
+  name                        = "asg_launch_config"
+  image_id                    = data.aws_ami.ubuntu.id
+  instance_type               = "t2.micro"
+  key_name                    = "6225"
+  associate_public_ip_address = true
+  depends_on                  = [aws_db_instance.csye6225]
+  user_data                   = <<EOF
 #!/bin/bash
 sudo touch .env
 sudo echo '#!/bin/bash' > .env
@@ -430,13 +494,120 @@ PASSWORD="${aws_db_instance.csye6225.password}"
 Bucket="${aws_s3_bucket.webapp-wenhao-min.id}"
 DB="${aws_db_instance.csye6225.name}"" >> /etc/environment
 EOF
+  iam_instance_profile        = aws_iam_instance_profile.CodeDeployEC2ServiceRole.name
+
+  security_groups = [aws_security_group.application.id]
+}
+
+resource "aws_lb" "app_lb" {
+  name               = "app-load-balancer"
+  internal           = false
+  load_balancer_type = "application"
+  security_groups    = [aws_security_group.load_balancer.id]
+  subnets            = [aws_subnet.subnet1.id, aws_subnet.subnet2.id, aws_subnet.subnet3.id]
+}
+
+resource "aws_lb_target_group" "lb_target_group" {
+  name     = "lb-target-group"
+  port     = 8080
+  protocol = "HTTP"
+  vpc_id   = aws_vpc.vpc1234.id
+  health_check {
+    path     = "/v1/users"
+    port     = 8080
+    interval = 300
+  }
+}
+resource "aws_lb_listener" "app_lb_listener_https" {
+  load_balancer_arn = aws_lb.app_lb.arn
+  port              = "443"
+  protocol          = "HTTPS"
+  certificate_arn   = "arn:aws:acm:us-east-1:231232113671:certificate/71144f2f-2c38-4ed7-8deb-c63c5a5f71ec"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.lb_target_group.arn
+  }
+}
+
+
+resource "aws_autoscaling_group" "aws_autoscale_gr" {
+  name                      = "aws_autoscale_gr"
+  default_cooldown          = 60
+  launch_configuration      = aws_launch_configuration.asg_launch_config.name
+  health_check_grace_period = 300
+  health_check_type         = "EC2"
+  max_size                  = 5
+  min_size                  = 3
+  desired_capacity          = 3
+  vpc_zone_identifier       = [aws_subnet.subnet1.id, aws_subnet.subnet2.id, aws_subnet.subnet3.id]
+  tag {
+    key                 = "NAME"
+    value               = "autoscaleEC2"
+    propagate_at_launch = true
+  }
+  target_group_arns = [aws_lb_target_group.lb_target_group.arn]
+}
+resource "aws_autoscaling_policy" "autoscaling_scale_up_policy" {
+  name                   = "WebServerScaleUpPolicy"
+  scaling_adjustment     = 1
+  adjustment_type        = "ChangeInCapacity"
+  cooldown               = 60
+  autoscaling_group_name = aws_autoscaling_group.aws_autoscale_gr.name
+}
+resource "aws_cloudwatch_metric_alarm" "CPUAlarmHigh" {
+  alarm_name         = "CPUAlarmHigh"
+  alarm_description  = "Scale-up if CPU > 90% for 10 minutes"
+  metric_name        = "CPUUtilization"
+  namespace          = "AWS/EC2"
+  statistic          = "Average"
+  period             = "300"
+  evaluation_periods = "2"
+  threshold          = 90
+  alarm_actions      = [aws_autoscaling_policy.autoscaling_scale_up_policy.arn]
+  dimensions = {
+    AutoScalingGroupName = aws_autoscaling_group.aws_autoscale_gr.name
+  }
+  comparison_operator = "GreaterThanThreshold"
+}
+resource "aws_autoscaling_policy" "autoscaling_scale_down_policy" {
+  name                   = "WebServerScaleDownPolicy"
+  scaling_adjustment     = -1
+  adjustment_type        = "ChangeInCapacity"
+  cooldown               = 60
+  autoscaling_group_name = aws_autoscaling_group.aws_autoscale_gr.name
+}
+resource "aws_cloudwatch_metric_alarm" "CPUAlarmLow" {
+  alarm_name         = "CPUAlarmLow"
+  alarm_description  = "Scale-down if CPU < 70% for 10 minutes"
+  metric_name        = "CPUUtilization"
+  namespace          = "AWS/EC2"
+  statistic          = "Average"
+  period             = "300"
+  evaluation_periods = "2"
+  threshold          = 70
+  alarm_actions      = [aws_autoscaling_policy.autoscaling_scale_up_policy.arn]
+  dimensions = {
+    AutoScalingGroupName = aws_autoscaling_group.aws_autoscale_gr.name
+  }
+  comparison_operator = "LessThanThreshold"
+}
+resource "aws_route53_record" "subdomin-ns" {
+  zone_id = var.profile == "prod" ? "Z0809633154F51HJX4K3" : "Z08074672NPNTYRSOVXG0"
+  name    = var.profile == "prod" ? "prod.wenhaom.me" : "dev.wenhaom.me"
+  type    = "A"
+
+  alias {
+    name                   = aws_lb.app_lb.dns_name
+    zone_id                = aws_lb.app_lb.zone_id
+    evaluate_target_health = false
+  }
 }
 
 resource "aws_codedeploy_app" "example" {
   compute_platform = "Server"
   name             = "csye6225-webapp"
 }
-
 resource "aws_codedeploy_deployment_group" "example" {
   app_name               = "csye6225-webapp"
   deployment_config_name = "CodeDeployDefault.AllAtOnce"
@@ -449,9 +620,9 @@ resource "aws_codedeploy_deployment_group" "example" {
   }
   ec2_tag_set {
     ec2_tag_filter {
-      key   = "Name"
+      key   = "NAME"
       type  = "KEY_AND_VALUE"
-      value = "CodeDeployEC2"
+      value = "autoscaleEC2"
     }
   }
   auto_rollback_configuration {
@@ -459,40 +630,5 @@ resource "aws_codedeploy_deployment_group" "example" {
     events  = ["DEPLOYMENT_FAILURE"]
   }
 }
-
-resource "aws_route53_record" "dev-ns" {
-  zone_id = "Z0203108ITBZKHE9MNZV"
-  name    = "dev.wenhaom.me"
-  type    = "A"
-  ttl     = "60"
-  records = [aws_instance.web.public_ip]
-}
-resource "aws_route53_record" "prod-ns" {
-  zone_id = "Z048429427DLHB8MB7QVP"
-  name    = "prod.wenhaom.me"
-  type    = "A"
-  ttl     = "60"
-  records = [aws_instance.web.public_ip]
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
