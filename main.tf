@@ -516,7 +516,7 @@ resource "aws_lb_target_group" "lb_target_group" {
   vpc_id      = aws_vpc.vpc1234.id
   target_type = "instance"
   health_check {
-    path     = "/v1/users"
+    path     = "/mybooks"
     port     = 8080
     interval = 300
   }
