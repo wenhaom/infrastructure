@@ -89,17 +89,10 @@ resource "aws_route_table_association" "c" {
   subnet_id      = aws_subnet.subnet3.id
   route_table_id = aws_route_table.r.id
 }
-
-resource "aws_security_group" "application" {
-  name        = "application"
-  description = "Allow application inbound traffic"
+resource "aws_security_group" "load_balancer" {
+  name        = "security-group-lb"
+  description = "only allow 80 for ingress"
   vpc_id      = aws_vpc.vpc1234.id
-  ingress {
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
   ingress {
     from_port   = 80
     to_port     = 80
@@ -112,11 +105,44 @@ resource "aws_security_group" "application" {
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+resource "aws_security_group" "application" {
+  name        = "application"
+  description = "Allow application inbound traffic"
+  vpc_id      = aws_vpc.vpc1234.id
   ingress {
-    from_port   = 8080
-    to_port     = 8080
+    from_port   = 22
+    to_port     = 22
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
+  }
+  ingress {
+    from_port = 80
+    to_port   = 80
+    protocol  = "tcp"
+    # cidr_blocks     = ["0.0.0.0/0"]
+    security_groups = [aws_security_group.load_balancer.id]
+  }
+  ingress {
+    from_port = 443
+    to_port   = 443
+    protocol  = "tcp"
+    # cidr_blocks     = ["0.0.0.0/0"]
+    security_groups = [aws_security_group.load_balancer.id]
+  }
+  ingress {
+    from_port = 8080
+    to_port   = 8080
+    protocol  = "tcp"
+    # cidr_blocks     = ["0.0.0.0/0"]
+    security_groups = [aws_security_group.load_balancer.id]
   }
 
   egress {
@@ -186,7 +212,7 @@ resource "aws_db_instance" "csye6225" {
   allocated_storage    = 10
   engine               = "mysql"
   engine_version       = "5.7"
-  instance_class       = "db.t3.micro"
+  instance_class       = "db.t2.micro"
   identifier           = "csye6225"
   name                 = "csye6225"
   username             = "csye6225"
@@ -409,6 +435,110 @@ resource "aws_iam_instance_profile" "CodeDeployEC2ServiceRole" {
   name = "CodeDeployEC2ServiceRole"
   role = aws_iam_role.CodeDeployEC2ServiceRole.name
 }
+resource "aws_iam_role" "lambda_basic_execution_role" {
+  name = "lambda_basic_execution_role"
+  assume_role_policy = jsonencode({
+    "Version" : "2012-10-17",
+    "Statement" : [
+      {
+        "Effect" : "Allow",
+        "Principal" : {
+          "Service" : "lambda.amazonaws.com"
+        },
+        "Action" : "sts:AssumeRole"
+      }
+    ]
+  })
+}
+resource "aws_iam_policy" "lambda_policy" {
+  name = "lambda_policy"
+  policy = jsonencode({
+    "Version" : "2012-10-17",
+    "Statement" : [
+      {
+        "Effect" : "Allow",
+        "Action" : [
+          "dynamodb:*",
+          "ses:*",
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents"
+        ],
+        "Resource" : "*"
+      }
+    ]
+  })
+}
+resource "aws_iam_policy" "ssn-publish-message-policy" {
+  name        = "policy_sns_publish_message"
+  description = "allow to publish message in sns"
+  policy      = <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+      {
+          "Effect": "Allow",
+          "Action": [
+              "sns:Publish"
+          ],
+          "Resource": [
+              "arn:aws:sns:us-east-1:231232113671:topic"
+          ]
+      }
+  ]
+}
+EOF
+}
+resource "aws_iam_policy_attachment" "attach_sns_publish_policy_to_ec2_role" {
+  name       = "attach_sns_publish_policy_to_ec2_role"
+  roles      = [aws_iam_role.CodeDeployEC2ServiceRole.name]
+  policy_arn = aws_iam_policy.ssn-publish-message-policy.arn
+}
+resource "aws_iam_policy_attachment" "attach_ses_db_lambda_basic_execution_role" {
+  name       = "attach_ses_dynomodb_lambda_basic_execution_role"
+  roles      = [aws_iam_role.lambda_basic_execution_role.name]
+  policy_arn = aws_iam_policy.lambda_policy.arn
+}
+resource "aws_sns_topic" "sns_topic" {
+  name = "topic"
+}
+resource "aws_dynamodb_table" "table" {
+  name           = "dynamodb6225"
+  hash_key       = "id"
+  read_capacity  = 2
+  write_capacity = 2
+
+  attribute {
+    name = "id"
+    type = "S"
+  }
+}
+resource "aws_lambda_function" "lambda_func" {
+  //filename      = "lambda_function_payload.zip"
+  function_name = "lambda_func"
+  role          = aws_iam_role.lambda_basic_execution_role.arn
+  handler       = "index.handler"
+  s3_bucket     = "codedeploy.wenhao.min.prod"
+  s3_key        = "function.zip"
+  //source_code_hash = filebase64sha256("lambda_function_payload.zip")
+
+  runtime = "nodejs14.x"
+}
+resource "aws_lambda_permission" "with_sns" {
+  statement_id  = "AllowExecutionFromSNS"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.lambda_func.function_name
+  principal     = "sns.amazonaws.com"
+  source_arn    = aws_sns_topic.sns_topic.arn
+}
+#Create a subscription
+resource "aws_sns_topic_subscription" "lambda_subscription" {
+  topic_arn = aws_sns_topic.sns_topic.arn
+  protocol  = "lambda"
+  endpoint  = aws_lambda_function.lambda_func.arn
+}
+
+
 # resource "aws_instance" "web" {
 #   ami           = data.aws_ami.ubuntu.id
 #   instance_type = "t2.micro"
@@ -449,35 +579,6 @@ resource "aws_iam_instance_profile" "CodeDeployEC2ServiceRole" {
 # }
 
 
-
-
-
-
-
-resource "aws_security_group" "load_balancer" {
-  name        = "security-group-lb"
-  description = "only allow 80 for ingress"
-  vpc_id      = aws_vpc.vpc1234.id
-  ingress {
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-  ingress {
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-  egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-}
-
 resource "aws_launch_configuration" "asg_launch_config" {
   name                        = "asg_launch_config"
   image_id                    = data.aws_ami.ubuntu.id
@@ -510,15 +611,16 @@ resource "aws_lb" "app_lb" {
 }
 
 resource "aws_lb_target_group" "lb_target_group" {
-  name        = "lb-target-group"
-  port        = 8080
-  protocol    = "HTTP"
-  vpc_id      = aws_vpc.vpc1234.id
-  target_type = "instance"
+  name                 = "lb-target-group"
+  port                 = 8080
+  protocol             = "HTTP"
+  vpc_id               = aws_vpc.vpc1234.id
+  target_type          = "instance"
+  deregistration_delay = 30
   health_check {
     path     = "/mybooks"
     port     = 8080
-    interval = 300
+    interval = 30
   }
 }
 resource "aws_lb_listener" "app_lb_listener_https" {
@@ -559,13 +661,13 @@ resource "aws_autoscaling_policy" "autoscaling_scale_up_policy" {
 }
 resource "aws_cloudwatch_metric_alarm" "CPUAlarmHigh" {
   alarm_name         = "CPUAlarmHigh"
-  alarm_description  = "Scale-up if CPU > 90% for 10 minutes"
+  alarm_description  = "Scale-up if CPU > 5% for 60 seconds"
   metric_name        = "CPUUtilization"
   namespace          = "AWS/EC2"
   statistic          = "Average"
-  period             = "300"
+  period             = "60"
   evaluation_periods = "2"
-  threshold          = 90
+  threshold          = 5
   alarm_actions      = [aws_autoscaling_policy.autoscaling_scale_up_policy.arn]
   dimensions = {
     AutoScalingGroupName = aws_autoscaling_group.aws_autoscale_gr.name
@@ -581,13 +683,13 @@ resource "aws_autoscaling_policy" "autoscaling_scale_down_policy" {
 }
 resource "aws_cloudwatch_metric_alarm" "CPUAlarmLow" {
   alarm_name         = "CPUAlarmLow"
-  alarm_description  = "Scale-down if CPU < 70% for 10 minutes"
+  alarm_description  = "Scale-down if CPU < 3% for 60 seconds"
   metric_name        = "CPUUtilization"
   namespace          = "AWS/EC2"
   statistic          = "Average"
-  period             = "300"
+  period             = "60"
   evaluation_periods = "2"
-  threshold          = 70
+  threshold          = 3
   alarm_actions      = [aws_autoscaling_policy.autoscaling_scale_down_policy.arn]
   dimensions = {
     AutoScalingGroupName = aws_autoscaling_group.aws_autoscale_gr.name
@@ -612,20 +714,20 @@ resource "aws_codedeploy_deployment_group" "example" {
     deployment_option = "WITH_TRAFFIC_CONTROL"
     deployment_type   = "IN_PLACE"
   }
-  ec2_tag_set {
-    ec2_tag_filter {
-      key   = "NAME"
-      type  = "KEY_AND_VALUE"
-      value = "autoscaleEC2"
-    }
-  }
+  # ec2_tag_set {
+  #   ec2_tag_filter {
+  #     key   = "NAME"
+  #     type  = "KEY_AND_VALUE"
+  #     value = "autoscaleEC2"
+  #   }
+  # }
+  autoscaling_groups = [aws_autoscaling_group.aws_autoscale_gr.id]
+
   auto_rollback_configuration {
     enabled = true
     events  = ["DEPLOYMENT_FAILURE"]
   }
 }
-
-
 
 resource "aws_route53_record" "subdomin-ns" {
   zone_id = var.profile == "prod" ? "Z0809633154F51HJX4K3" : "Z08074672NPNTYRSOVXG0"
@@ -635,7 +737,7 @@ resource "aws_route53_record" "subdomin-ns" {
   alias {
     name                   = aws_lb.app_lb.dns_name
     zone_id                = aws_lb.app_lb.zone_id
-    evaluate_target_health = true
+    evaluate_target_health = false
   }
 }
 
