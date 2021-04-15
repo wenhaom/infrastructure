@@ -212,7 +212,7 @@ resource "aws_db_instance" "csye6225" {
   allocated_storage    = 10
   engine               = "mysql"
   engine_version       = "5.7"
-  instance_class       = "db.t2.micro"
+  instance_class       = "db.t3.micro"
   identifier           = "csye6225"
   name                 = "csye6225"
   username             = "csye6225"
@@ -221,6 +221,7 @@ resource "aws_db_instance" "csye6225" {
   skip_final_snapshot  = true
   multi_az             = "false"
   db_subnet_group_name = aws_db_subnet_group.subnetforrdsinstances.id
+  storage_encrypted    = true
 
   publicly_accessible    = "false"
   vpc_security_group_ids = [aws_security_group.database.id]
@@ -394,6 +395,8 @@ resource "aws_iam_policy_attachment" "ec2service-attach" {
   policy_arn = aws_iam_policy.CodeDeploy-EC2-S3.arn
 }
 
+
+
 resource "aws_iam_role" "CodeDeployServiceRole" {
   name = "CodeDeployServiceRole"
   assume_role_policy = jsonencode({
@@ -415,6 +418,60 @@ resource "aws_iam_role" "CodeDeployServiceRole" {
     tag-key = "tag-value"
   }
 }
+# data "aws_iam_policy_document" "example" {
+#   statement {
+#     sid    = "AllowservicelinkedroleuseoftheCMK"
+#     effect = "Allow"
+#     actions = [
+#       "kms:Encrypt",
+#       "kms:Decrypt",
+#       "kms:ReEncrypt*",
+#       "kms:GenerateDataKey*",
+#       "kms:DescribeKey"
+#     ]
+#     resources = [
+#       "*"
+#     ]
+#     principals {
+#       type        = "AWS"
+#       identifiers = ["arn:aws:iam::231232113671:role/aws-service-role/autoscaling.amazonaws.com/AWSServiceRoleForAutoScaling"]
+#     }
+#   }
+
+#   statement {
+#     sid    = "Allowattachmentofpersistentresources"
+#     effect = "Allow"
+#     principals {
+#       type        = "AWS"
+#       identifiers = ["arn:aws:iam::231232113671:role/aws-service-role/autoscaling.amazonaws.com/AWSServiceRoleForAutoScaling"]
+#     }
+#     actions = [
+#       "kms:CreateGrant"
+#     ]
+#     resources = [
+#       "*"
+#     ]
+#     condition {
+#       test     = "Bool"
+#       variable = "kms:GrantIsForAWSResource"
+#       values = [
+#         "ture"
+#       ]
+#     }
+#   }
+
+# }
+
+# resource "aws_iam_policy" "example" {
+#   name   = "example_policy"
+#   path   = "/"
+#   policy = data.aws_iam_policy_document.example.json
+# }
+# resource "aws_iam_policy_attachment" "codedeployservicerole-attachCMK" {
+#   name       = "codedeployservicerole-attachmentCMK"
+#   roles      = [aws_iam_role.AWSServiceRoleForAutoScaling.name]
+#   policy_arn = aws_iam_policy.example.arn
+# }
 
 resource "aws_iam_policy_attachment" "codedeployservicerole-attach" {
   name       = "codedeployservicerole-attachment"
@@ -599,6 +656,15 @@ EOF
   iam_instance_profile        = aws_iam_instance_profile.CodeDeployEC2ServiceRole.name
 
   security_groups = [aws_security_group.application.id]
+  root_block_device {
+    volume_type           = "gp2"
+    volume_size           = 20
+    delete_on_termination = true
+    encrypted             = true
+
+  }
+
+
 }
 
 resource "aws_lb" "app_lb" {
@@ -625,9 +691,9 @@ resource "aws_lb_target_group" "lb_target_group" {
 }
 resource "aws_lb_listener" "app_lb_listener_https" {
   load_balancer_arn = aws_lb.app_lb.arn
-  port              = "80"
-  protocol          = "HTTP"
-
+  port              = "443"
+  protocol          = "HTTPS"
+  certificate_arn   = "arn:aws:acm:us-east-1:231232113671:certificate/73f669ff-bd3f-42aa-b3b6-33fff9e8da05"
   default_action {
     type             = "forward"
     target_group_arn = aws_lb_target_group.lb_target_group.arn
@@ -739,6 +805,26 @@ resource "aws_route53_record" "subdomin-ns" {
     zone_id                = aws_lb.app_lb.zone_id
     evaluate_target_health = false
   }
+}
+resource "aws_iam_policy" "aws-deploy-lambda-policy" {
+  name        = "aws_deploy_lambda_policy"
+  description = "allow aws cli to deploy lambda application"
+  policy      = <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+      {
+          "Effect": "Allow",
+          "Action": [
+              "lambda:UpdateFunctionCode"
+          ],
+          "Resource": [
+              "arn:aws:lambda::function:lambda_func"
+          ]
+      }
+  ]
+}
+EOF
 }
 
 

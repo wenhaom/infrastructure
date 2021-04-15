@@ -19,3 +19,9 @@
 
 # mv .env ~/webapp-1
 # /var/lib/cloud/instance/scripts/
+
+
+# command to import certificate 
+# $ aws acm import-certificate --certificate fileb://Certificate.pem \
+#      --certificate-chain fileb://CertificateChain.pem \
+#      --private-key fileb://PrivateKey.pem 	
