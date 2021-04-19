@@ -207,22 +207,75 @@ resource "aws_db_subnet_group" "subnetforrdsinstances" {
     Name = "subnetforrdsinstances"
   }
 }
+resource "aws_kms_key" "rds" {
+  description             = "KMS key for rds"
+  deletion_window_in_days = 29
+  policy                  = <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+     {
+   "Sid": "Allow service-linked role use of the CMK",
+   "Effect": "Allow",
+   "Principal": {
+       "AWS": [
+           "arn:aws:iam::231232113671:role/aws-service-role/autoscaling.amazonaws.com/AWSServiceRoleForAutoScaling"
+       ]
+   },
+   "Action": [
+       "kms:Encrypt",
+       "kms:Decrypt",
+       "kms:ReEncrypt*",
+       "kms:GenerateDataKey*",
+       "kms:DescribeKey"
+   ],
+   "Resource": "*"
+},{
+   "Sid": "Allow attachment of persistent resources",
+   "Effect": "Allow",
+   "Principal": {
+       "AWS": [
+           "arn:aws:iam::231232113671:role/aws-service-role/autoscaling.amazonaws.com/AWSServiceRoleForAutoScaling"
+       ]
+   },
+   "Action": [
+       "kms:CreateGrant"
+   ],
+   "Resource": "*",
+   "Condition": {
+       "Bool": {
+           "kms:GrantIsForAWSResource": true
+       }
+    }
+},{
+            "Sid": "Enable IAM User Permissions",
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": "arn:aws:iam::231232113671:root"
+            },
+            "Action": "kms:*",
+            "Resource": "*"
+        }
+  ]
+}
+EOF
+}
 
 resource "aws_db_instance" "csye6225" {
-  allocated_storage    = 10
-  engine               = "mysql"
-  engine_version       = "5.7"
-  instance_class       = "db.t3.micro"
-  identifier           = "csye6225"
-  name                 = "csye6225"
-  username             = "csye6225"
-  password             = "Mmwh1992"
-  parameter_group_name = "default.mysql5.7"
-  skip_final_snapshot  = true
-  multi_az             = "false"
-  db_subnet_group_name = aws_db_subnet_group.subnetforrdsinstances.id
-  storage_encrypted    = true
-
+  allocated_storage      = 10
+  engine                 = "mysql"
+  engine_version         = "5.7"
+  instance_class         = "db.t3.micro"
+  identifier             = "csye6225"
+  name                   = "csye6225"
+  username               = "csye6225"
+  password               = "Mmwh1992"
+  parameter_group_name   = "default.mysql5.7"
+  skip_final_snapshot    = true
+  multi_az               = "false"
+  db_subnet_group_name   = aws_db_subnet_group.subnetforrdsinstances.id
+  storage_encrypted      = true
+  kms_key_id             = aws_kms_key.rds.arn
   publicly_accessible    = "false"
   vpc_security_group_ids = [aws_security_group.database.id]
   apply_immediately      = true
@@ -418,60 +471,7 @@ resource "aws_iam_role" "CodeDeployServiceRole" {
     tag-key = "tag-value"
   }
 }
-# data "aws_iam_policy_document" "example" {
-#   statement {
-#     sid    = "AllowservicelinkedroleuseoftheCMK"
-#     effect = "Allow"
-#     actions = [
-#       "kms:Encrypt",
-#       "kms:Decrypt",
-#       "kms:ReEncrypt*",
-#       "kms:GenerateDataKey*",
-#       "kms:DescribeKey"
-#     ]
-#     resources = [
-#       "*"
-#     ]
-#     principals {
-#       type        = "AWS"
-#       identifiers = ["arn:aws:iam::231232113671:role/aws-service-role/autoscaling.amazonaws.com/AWSServiceRoleForAutoScaling"]
-#     }
-#   }
 
-#   statement {
-#     sid    = "Allowattachmentofpersistentresources"
-#     effect = "Allow"
-#     principals {
-#       type        = "AWS"
-#       identifiers = ["arn:aws:iam::231232113671:role/aws-service-role/autoscaling.amazonaws.com/AWSServiceRoleForAutoScaling"]
-#     }
-#     actions = [
-#       "kms:CreateGrant"
-#     ]
-#     resources = [
-#       "*"
-#     ]
-#     condition {
-#       test     = "Bool"
-#       variable = "kms:GrantIsForAWSResource"
-#       values = [
-#         "ture"
-#       ]
-#     }
-#   }
-
-# }
-
-# resource "aws_iam_policy" "example" {
-#   name   = "example_policy"
-#   path   = "/"
-#   policy = data.aws_iam_policy_document.example.json
-# }
-# resource "aws_iam_policy_attachment" "codedeployservicerole-attachCMK" {
-#   name       = "codedeployservicerole-attachmentCMK"
-#   roles      = [aws_iam_role.AWSServiceRoleForAutoScaling.name]
-#   policy_arn = aws_iam_policy.example.arn
-# }
 
 resource "aws_iam_policy_attachment" "codedeployservicerole-attach" {
   name       = "codedeployservicerole-attachment"
@@ -634,7 +634,62 @@ resource "aws_sns_topic_subscription" "lambda_subscription" {
 #   ttl     = "60"
 #   records = [aws_instance.web.public_ip]
 # }
-
+resource "aws_kms_key" "ebs" {
+  description             = "KMS key for ebs"
+  deletion_window_in_days = 29
+  policy                  = <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+     {
+   "Sid": "Allow service-linked role use of the CMK",
+   "Effect": "Allow",
+   "Principal": {
+       "AWS": [
+           "arn:aws:iam::231232113671:role/aws-service-role/autoscaling.amazonaws.com/AWSServiceRoleForAutoScaling"
+       ]
+   },
+   "Action": [
+       "kms:Encrypt",
+       "kms:Decrypt",
+       "kms:ReEncrypt*",
+       "kms:GenerateDataKey*",
+       "kms:DescribeKey"
+   ],
+   "Resource": "*"
+},{
+   "Sid": "Allow attachment of persistent resources",
+   "Effect": "Allow",
+   "Principal": {
+       "AWS": [
+           "arn:aws:iam::231232113671:role/aws-service-role/autoscaling.amazonaws.com/AWSServiceRoleForAutoScaling"
+       ]
+   },
+   "Action": [
+       "kms:CreateGrant"
+   ],
+   "Resource": "*",
+   "Condition": {
+       "Bool": {
+           "kms:GrantIsForAWSResource": true
+       }
+    }
+},{
+            "Sid": "Enable IAM User Permissions",
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": "arn:aws:iam::231232113671:root"
+            },
+            "Action": "kms:*",
+            "Resource": "*"
+        }
+  ]
+}
+EOF
+}
+resource "aws_ebs_default_kms_key" "example" {
+  key_arn = aws_kms_key.ebs.arn
+}
 
 resource "aws_launch_configuration" "asg_launch_config" {
   name                        = "asg_launch_config"
@@ -661,6 +716,7 @@ EOF
     volume_size           = 20
     delete_on_termination = true
     encrypted             = true
+
 
   }
 
